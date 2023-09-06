@@ -28,6 +28,22 @@ async def weather(message: Message):
     await message.answer("Please enter your city name")
 
 
+@dp.message(lambda msg: msg.text in ['Maximum temperature', 'Minimum temperature', 'Pressure', 'Humidity'])
+async def click(message: Message):
+    dtb = None
+    match message.text:
+        case 'Maximum temperature':
+            dtb = DATA['main']['temp_max']
+        case 'Minimum temperature':
+            dtb = DATA['main']['temp_min']
+        case 'Pressure':
+            dtb = DATA['main']['pressure']
+        case 'Humidity':
+            dtb = DATA['main']['humidity']
+
+    await message.answer(str(dtb))
+
+
 @dp.message()
 async def show_weather(message: Message):
     city = message.text
