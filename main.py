@@ -1,37 +1,28 @@
 import os
 import asyncio
 
-from aiogram import Bot, Dispatcher
-from aiogram.types import (
-    Message,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    CallbackQuery
-)
+from aiogram import Bot
+from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.filters import CommandStart
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 
 from dotenv import load_dotenv
 
-from code import get_address_using_location
-from databases.database import create_user_table, insert_data
+from code import get_address_using_location, get_temperature
+from databases.database import create_user_table
+from keyboards.keyboards import contact_keyboard, location_keyboard, client_choice
 from states.states import UserState
+from dispatcher import dp
+from commands.commands import start, help, weather
+from callback_handler import callback_handlers
 
 load_dotenv()
-
-TOKEN = os.getenv('BOT_TOKEN')
-
-dp = Dispatcher(storage=MemoryStorage())
 
 
 @dp.message(CommandStart())
 async def startup(message: Message, state: FSMContext):
     first_name = message.from_user.first_name
-    contact = KeyboardButton(text="☎️ Share contact", request_contact=True)
-    reply_markup = ReplyKeyboardMarkup(keyboard=[[contact]], resize_keyboard=True, one_time_keyboard=True)
+    reply_markup = contact_keyboard()
     await message.answer(
         f"Hello {first_name}! Please share your contact.",
         reply_markup=reply_markup
@@ -46,7 +37,7 @@ async def phone(message: Message, state: FSMContext):
     await state.update_data({
         'phone': contact.phone_number
     })
-    await message.answer('Enter your first name')
+    await message.answer('Enter your first name', reply_markup=ReplyKeyboardRemove())
     await state.set_state(UserState.first_name)
 
 
@@ -64,8 +55,7 @@ async def last_name(message: Message, state: FSMContext):
     await state.update_data({
         'last_name': message.text
     })
-    location_btn = KeyboardButton(text='📍 Share your location', request_location=True)
-    reply_markup = ReplyKeyboardMarkup(keyboard=[[location_btn]], resize_keyboard=True, one_time_keyboard=True)
+    reply_markup = location_keyboard()
     await message.answer('Share your location', reply_markup=reply_markup)
     await state.set_state(UserState.address)
 
@@ -90,52 +80,25 @@ async def address(message: Message, state: FSMContext):
 🧍‍♂️Last name: {last_name}
 🌍Address: {address}
     '''
-    confirm_btn = InlineKeyboardButton(text='Confirm', callback_data='confirm')
-    cancel_btn = InlineKeyboardButton(text='Cancel', callback_data='cancel')
-    reply_markup = InlineKeyboardMarkup(inline_keyboard=[[confirm_btn, cancel_btn]])
+    await message.answer('Confirm or Cancel', reply_markup=ReplyKeyboardRemove())
+    reply_markup = client_choice()
     await message.answer(msg, reply_markup=reply_markup)
 
 
-@dp.callback_query(lambda callback_query: callback_query.data == 'confirm')
-async def confirm(callback_query: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    user_data = dict(
-        phone=data['phone'],
-        first_name=data['first_name'],
-        last_name=data['last_name'],
-        address=data['address']
-    )
-    insert_data(user_data)
-    await state.storage.close()
-    await state.clear()
-    await callback_query.message.answer('Successfully registered!')
-    await callback_query.message.delete()
-
-
-@dp.callback_query(lambda callback_query: callback_query.data == 'cancel')
-async def cancel(callback_query: CallbackQuery, state: FSMContext):
-    await state.storage.close()
-    await state.clear()
-    await callback_query.message.answer('Canceled. Please try again')
-    await callback_query.message.delete()
-    first_name = callback_query.message.from_user.first_name
-    contact = KeyboardButton(text="☎️ Share contact", request_contact=True)
-    reply_markup = ReplyKeyboardMarkup(keyboard=[[contact]], resize_keyboard=True, one_time_keyboard=True)
-    await callback_query.message.answer(
-        f"Hello {first_name}! Please share your contact.",
-        reply_markup=reply_markup
-    )
-    await state.set_state(UserState.phone)
-
-
-@dp.message(lambda msg: msg.text == '/help')
-async def help_function(message: Message):
-    await message.answer('Welcome to our bot!')
+@dp.message(lambda msg: msg.location is not None)
+async def get_weather(message: Message):
+    location = message.location
+    lon = location.longitude
+    lat = location.latitude
+    temp = get_temperature(lat, lon)
+    await message.answer(str(round(temp['main']['temp'], 1)) + '°C', reply_markup=ReplyKeyboardRemove())
 
 
 async def main():
-    bot = Bot(TOKEN)
+    token = os.getenv('BOT_TOKEN')
+    bot = Bot(token)
     create_user_table()
+    await bot.set_my_commands(commands=[start, help, weather])
     await dp.start_polling(bot)
 
 
